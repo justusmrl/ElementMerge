@@ -1,0 +1,51 @@
+name: Frozen Acquisition Debug
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/frozen-acquisition-debug.yml'
+      - 'research/payload/**'
+      - 'research/patches/**'
+
+permissions:
+  contents: read
+
+jobs:
+  debug-acquisition:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Reconstruct and instrument frozen script
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat research/payload/part* | base64 -d | gzip -d > /tmp/acquire.py
+          sed -i 's#/tmp/pumpfun_phase1_acquire.py#/tmp/acquire.py#g' research/patches/apply_slot_anchor_patch.py
+          python research/patches/apply_slot_anchor_patch.py
+          python research/patches/apply_launch_debug_patch.py
+          python -m py_compile /tmp/acquire.py
+          sha256sum /tmp/acquire.py | tee acquisition_script.sha256
+      - run: python -m pip install --quiet requests pandas pyarrow
+      - name: Run instrumented one-day acquisition
+        shell: bash
+        run: |
+          set -o pipefail
+          python /tmp/acquire.py acquire --shard 0 --shards 1 \
+            --start-date 2026-07-23 --end-date 2026-07-24 \
+            --output-dir out --metadata-workers 32 --mint-batch-size 200 \
+            2>&1 | tee frozen-debug.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frozen-acquisition-debug-${{ github.run_id }}
+          path: |
+            out/
+            frozen-debug.log
+            acquisition_script.sha256
+          if-no-files-found: warn
+          retention-days: 7
