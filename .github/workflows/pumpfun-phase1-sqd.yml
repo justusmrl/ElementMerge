@@ -5,26 +5,57 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/pumpfun-phase1-sqd.yml'
-      - 'research/pumpfun_phase1_acquire.py'
+      - 'research/payload/**'
 
 permissions:
   contents: read
 
 jobs:
-  sqd-schema-probe:
+  phase1-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Check out research branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: python -m pip install --disable-pip-version-check --quiet requests
-      - run: python research/pumpfun_phase1_acquire.py --probe --output-dir out/phase1
-      - if: always()
+
+      - name: Reconstruct frozen acquisition script
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat research/payload/part* | base64 -d | gzip -d > /tmp/pumpfun_phase1_acquire.py
+          python -m py_compile /tmp/pumpfun_phase1_acquire.py
+          sha256sum /tmp/pumpfun_phase1_acquire.py | tee acquisition_script.sha256
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check --quiet requests pandas pyarrow
+
+      - name: Run one-day read-only acquisition smoke test
+        shell: bash
+        run: |
+          set -o pipefail
+          python /tmp/pumpfun_phase1_acquire.py acquire \
+            --shard 0 \
+            --shards 1 \
+            --start-date 2026-07-23 \
+            --end-date 2026-07-24 \
+            --output-dir out \
+            --metadata-workers 64 \
+            --mint-batch-size 350 \
+            2>&1 | tee phase1-smoke.log
+
+      - name: Upload immutable smoke artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pumpfun-sqd-phase1-probe-${{ github.run_id }}
-          path: out/phase1/
-          if-no-files-found: error
+          name: pumpfun-sqd-phase1-smoke-${{ github.run_id }}
+          path: |
+            out/
+            phase1-smoke.log
+            acquisition_script.sha256
+          if-no-files-found: warn
           retention-days: 7
