@@ -1,61 +1,13 @@
-name: Pumpfun SQD Phase 1
+name: Pumpfun SQD Phase 1 (superseded)
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/pumpfun-phase1-sqd.yml'
-      - 'research/payload/**'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  phase1-smoke:
+  notice:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
     steps:
-      - name: Check out research branch
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Reconstruct frozen acquisition script
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat research/payload/part* | base64 -d | gzip -d > /tmp/pumpfun_phase1_acquire.py
-          python -m py_compile /tmp/pumpfun_phase1_acquire.py
-          sha256sum /tmp/pumpfun_phase1_acquire.py | tee acquisition_script.sha256
-
-      - name: Install dependencies
-        run: python -m pip install --disable-pip-version-check --quiet requests pandas pyarrow
-
-      - name: Run one-day read-only acquisition smoke test
-        shell: bash
-        run: |
-          set -o pipefail
-          python /tmp/pumpfun_phase1_acquire.py acquire \
-            --shard 0 \
-            --shards 1 \
-            --start-date 2026-07-23 \
-            --end-date 2026-07-24 \
-            --output-dir out \
-            --metadata-workers 64 \
-            --mint-batch-size 350 \
-            2>&1 | tee phase1-smoke.log
-
-      - name: Upload immutable smoke artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pumpfun-sqd-phase1-smoke-${{ github.run_id }}
-          path: |
-            out/
-            phase1-smoke.log
-            acquisition_script.sha256
-          if-no-files-found: warn
-          retention-days: 7
+      - run: echo 'Superseded by pumpfun-phase1-full-60d.yml'
