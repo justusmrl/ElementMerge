@@ -1,0 +1,42 @@
+name: Frozen Query Driver
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/frozen-query-driver.yml'
+      - 'research/frozen_query_driver.py'
+      - 'research/payload/**'
+      - 'research/patches/apply_slot_anchor_patch.py'
+
+permissions:
+  contents: read
+
+jobs:
+  frozen-query:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Reconstruct frozen code
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat research/payload/part* | base64 -d | gzip -d > /tmp/acquire.py
+          sed -i 's#/tmp/pumpfun_phase1_acquire.py#/tmp/acquire.py#g' research/patches/apply_slot_anchor_patch.py
+          python research/patches/apply_slot_anchor_patch.py
+          python -m py_compile /tmp/acquire.py
+      - run: python -m pip install --quiet requests pandas pyarrow
+      - run: python research/frozen_query_driver.py | tee frozen-query.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frozen-query-driver-${{ github.run_id }}
+          path: |
+            out/frozen-query-driver/
+            frozen-query.log
+          if-no-files-found: error
+          retention-days: 7
