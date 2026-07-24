@@ -1,0 +1,52 @@
+name: Historical Data Integrity Smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/data-integrity-smoke.yml'
+      - 'research/payload/**'
+      - 'research/patches/**'
+
+permissions:
+  contents: read
+
+jobs:
+  historical-data-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Reconstruct and validate acquisition code
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat research/payload/part* | base64 -d | gzip -d > /tmp/acquire.py
+          sed -i 's#/tmp/pumpfun_phase1_acquire.py#/tmp/acquire.py#g' research/patches/apply_slot_anchor_patch.py
+          python research/patches/apply_slot_anchor_patch.py
+          python -m py_compile /tmp/acquire.py
+          sha256sum /tmp/acquire.py | tee acquisition_script.sha256
+      - name: Install tabular dependencies
+        run: python -m pip install --disable-pip-version-check --quiet requests pandas pyarrow
+      - name: Run one-day read-only historical smoke test
+        shell: bash
+        run: |
+          set -o pipefail
+          python /tmp/acquire.py acquire \
+            --shard 0 --shards 1 \
+            --start-date 2026-07-23 --end-date 2026-07-24 \
+            --output-dir out --metadata-workers 64 --mint-batch-size 350 \
+            2>&1 | tee historical-smoke.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-data-smoke-${{ github.run_id }}
+          path: |
+            out/
+            historical-smoke.log
+            acquisition_script.sha256
+          if-no-files-found: warn
+          retention-days: 7
